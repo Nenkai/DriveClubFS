@@ -21,20 +21,37 @@ namespace DriveClubFS
 
         public EvoDataFile[] DataFiles { get; set; }
 
+        /// <summary>
+        /// For older versions without a split index file
+        /// </summary>
+        public EvoDataFile MainDataFile { get; set; }
+
         public void Init(string directory)
         {
             Console.WriteLine($"[:] Loading Evo File System from directory: {directory}");
             InputDirectory = directory;
 
-            if (!File.Exists(InputDirectory + "/game.ndx"))
-                throw new FileNotFoundException("game.ndx does not exist in the folder.");
+            if (File.Exists(InputDirectory + "/game.ndx"))
+            {
+                Console.WriteLine("[!] Loading Evo File System from game.idx file");
+                IndexFile = EvoIndexFile.ReadIndex(InputDirectory + "/game.ndx");
+                DataFiles = new EvoDataFile[IndexFile.DataFileCount];
 
-            IndexFile = EvoIndexFile.ReadIndex(InputDirectory + "/game.ndx");
+                Console.WriteLine($"[:] Version: {IndexFile.Version}");
+                Console.WriteLine($"[:] Data Files registered: {IndexFile.DataFileCount}");
+            }
+            else if (File.Exists(InputDirectory + "/game.dat"))
+            {
+                Console.WriteLine("[!] game.idx file not found, reading from game.dat");
+
+                MainDataFile = EvoDataFile.Init(0, InputDirectory + "/game.dat");
+                IndexFile = MainDataFile.Index;
+            }
+            else
+                throw new FileNotFoundException("Could not detect a valid evo file system in this directory.");
+
+            Console.WriteLine($"[:] Version: {IndexFile.Version}");
             Console.WriteLine($"[:] File System entries: {IndexFile.Entries.Count}");
-
-            DataFiles = new EvoDataFile[IndexFile.DataFileCount];
-            Console.WriteLine($"[:] Data Files registered: {IndexFile.DataFileCount}");
-
             Console.WriteLine($"[/] File System loaded.");
         }
 
@@ -42,7 +59,7 @@ namespace DriveClubFS
         {
             using var sw = new StreamWriter("files.txt");
             foreach (var file in IndexFile.Entries.OrderBy(e => e.FileName))
-                sw.WriteLine($"{file.FileName} ({file.Size} bytes, Dat Index: {file.DatIndexAndOffset & 0xFFFF}, Offset: 0x{(file.DatIndexAndOffset >> 16):X8})");
+                sw.WriteLine($"{file.FileName} ({file.Size} bytes, Dat Index: {file.DatIndex}, Offset: 0x{(file.FileOffset):X8})");
 
             Console.WriteLine($"[/] Printed {IndexFile.Entries.Count} entries.");
         }
@@ -63,6 +80,9 @@ namespace DriveClubFS
                 return;
             }
 
+            if (verifyChecksum && IndexFile.Version <= 3100)
+                verifyChecksum = false; // No checksum available
+
             reader.ExtractToFile(outputDirectory, index, verifyChecksum);
             Console.WriteLine($"[/] Extracted: {index.FileName}");
         }
@@ -72,16 +92,19 @@ namespace DriveClubFS
             int i = 0;
             int count = IndexFile.Entries.Count;
 
-            foreach (var file in IndexFile.Entries.OrderBy(e => e.FileName))
+            foreach (var file in IndexFile.Entries)
             {
                 using EvoFileReader reader = GetFileReader(file.FileName);
                 if (reader is null)
                 {
-                    Console.WriteLine($"[x] Cound not process '{file.FileName}' - Data File 'game{file.DatIndexAndOffset & 0xFF:D3}.dat' missing or errored");
+                    Console.WriteLine($"[x] Cound not process '{file.FileName}' - Data File 'game{file.DatIndex & 0xFF:D3}.dat' missing or errored");
                     continue;
                 }
 
                 Console.WriteLine($"[:] ({i + 1}/{count}) Extracting: {file.FileName}");
+
+                if (verifyChecksum && IndexFile.Version <= 3100)
+                    verifyChecksum = false; // No checksum available
 
                 reader.ExtractToFile(outputDirectory, file, verifyChecksum);
                 reader.Dispose();
@@ -98,11 +121,18 @@ namespace DriveClubFS
             if (entry is null)
                 return null;
 
-            var datFile = GetDatFile((short)(entry.DatIndexAndOffset & 0xFFFF));
-            if (datFile is null)
-                return null;
+            if (IndexFile.Version > 3100)
+            {
+                var datFile = GetDatFile((short)entry.DatIndex);
+                if (datFile is null)
+                    return null;
 
-            return new EvoFileReader(IndexFile, entry, datFile, file);
+                return new EvoFileReader(IndexFile, entry, datFile, file);
+            }
+            else
+            {
+                return new EvoFileReader(IndexFile, entry, MainDataFile, file);
+            }
         }
 
 

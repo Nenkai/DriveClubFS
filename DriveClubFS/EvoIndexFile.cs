@@ -16,39 +16,44 @@ namespace DriveClubFS
         public byte[] CompressDictionary;
         public byte[] CompressedFileNames;
 
+        public uint Version { get; set; }
+        public DateTime TimeStamp { get; set; }
         public uint HashA { get; set; }
         public uint HashB { get; set; }
-        public int CompressionFormat { get; set; }
-        public int BufferSizeMaybe { get; set; }
+        public EvoCompressionType CompressionFormat { get; set; }
+        public uint ReadBufferSize { get; set; }
         public int Unk5 { get; set; }
         public int Unk6 { get; set; }
         public int DataFileCount { get; set; }
         
-        public static EvoIndexFile ReadIndex(string fileName)
+        public static EvoIndexFile ReadIndex(Stream stream)
         {
+            var bs = new BinaryStream(stream);
             var indexFile = new EvoIndexFile();
-            using var fs = new FileStream(fileName, FileMode.Open);
-            using var bs = new BinaryStream(fs);
 
             int magic = bs.ReadInt32();
             if (magic != 0x4E544144 && magic != 0x58544144)
                 throw new InvalidDataException("Unexpected magic. Did not match DATX.");
 
-            int version = bs.ReadInt32();
-            if ((version & 0xF000) != 4096)
-                throw new InvalidDataException("Unexpected version. Did not match 4300.");
+            indexFile.Version = bs.ReadUInt32();
+            if (indexFile.Version != 4300 && indexFile.Version != 3100)
+                throw new InvalidDataException("Unexpected version. Did not match 4300 (1.28 Driveclub) or 3100 (Driveclub Alpha).");
 
-            bs.ReadInt64();
-            bs.ReadInt64();
+            indexFile.TimeStamp = DateTime.FromFileTimeUtc(bs.ReadInt64());
+            bs.ReadInt64(); // Self ptr/offset
             indexFile.HashA = bs.ReadUInt32();
             indexFile.HashB = bs.ReadUInt32();
-            indexFile.CompressionFormat = bs.ReadInt32();
-            indexFile.BufferSizeMaybe = bs.ReadInt32();
-            bs.ReadInt32();
-            bs.ReadInt32();
+            indexFile.CompressionFormat = (EvoCompressionType)bs.ReadInt32();
+            indexFile.ReadBufferSize = bs.ReadUInt32();
 
-            indexFile.DataFileCount = bs.ReadInt32();
-            bs.ReadInt32();
+            if (indexFile.Version > 3100)
+            {
+                bs.ReadInt32();
+                bs.ReadInt32();
+                indexFile.DataFileCount = bs.ReadInt32();
+                bs.ReadInt32();
+            }
+
             int nEntries = bs.ReadInt32();
             byte dictSize = bs.Read1Byte();
 
@@ -63,24 +68,45 @@ namespace DriveClubFS
 
             for (var i = 0; i < nEntries; i++)
             {
-                ulong datIndexAndHash = bs.ReadUInt64();
+                ushort datIndex;
+                ulong fileOffset;
+                if (indexFile.Version > 3100)
+                {
+                    ulong datIndexAndOffset = bs.ReadUInt64();
+                    datIndex = (ushort)(datIndexAndOffset & 0xFFFF);
+                    fileOffset = datIndexAndOffset >> 16;
+                }
+                else
+                {
+                    datIndex = 0; // Does not exist
+                    fileOffset = bs.ReadUInt64();
+                }
+
                 int fileSize = bs.ReadInt32();
                 uint fileNameHash = bs.ReadUInt32();
 
-                byte[] data = new byte[0x10];
-                bs.Read(data);
+                byte[] md5Hash = null;
+                if (indexFile.Version > 3100)
+                {
+                    md5Hash = new byte[0x10];
+                    bs.Read(md5Hash);
+                }
 
                 indexFile.Entries.Add(new EvoIndexFileEntry()
                 {
                     Size = fileSize,
-                    DatIndexAndOffset = datIndexAndHash,
+                    DatIndex = datIndex,
+                    FileOffset = fileOffset,
                     FileNameHash = fileNameHash,
-                    FileMD5Checksum = data,
+                    FileMD5Checksum = md5Hash,
                 });
             }
 
-            if (bs.ReadInt32() != 0x12345678)
-                throw new InvalidDataException("Data corrupted. 0x12345678 after index entries not found.");
+            if (indexFile.Version > 3100)
+            {
+                if (bs.ReadInt32() != 0x12345678)
+                    throw new InvalidDataException("Data corrupted. 0x12345678 after index entries not found.");
+            }
 
             Span<byte> compSpan = indexFile.CompressedFileNames.AsSpan();
             for (var i = 0; i < nEntries; i++)
@@ -92,8 +118,14 @@ namespace DriveClubFS
                 indexFile.Files.Add(entryName);
                 indexFile.Entries[i].FileName = entryName;
             }
-
+                
             return indexFile;
+        }
+
+        public static EvoIndexFile ReadIndex(string fileName)
+        {
+            using var fs = new FileStream(fileName, FileMode.Open);
+            return ReadIndex(fs);
         }
 
         public EvoIndexFileEntry FindFile(string fileName, long t = 0)
@@ -123,20 +155,20 @@ namespace DriveClubFS
                 }
             }
 
-            if (entry is not null)
+            if (entry is null)
             {
-                long weirdHash = (t - (long)(Entries[mid].DatIndexAndOffset >> 16));
+                long weirdHash = (t - (long)(Entries[mid].FileOffset));
                 if (weirdHash < 1)
-                    weirdHash = ((long)(Entries[mid].DatIndexAndOffset >> 16) - t);
+                    weirdHash = ((long)(Entries[mid].FileOffset) - t);
 
                 for (var i = mid + 1; i < Entries.Count; i++)
                 {
                     if (Entries[i].FileNameHash != target)
                         break;
 
-                    long currentHash = (t - (long)(Entries[i].DatIndexAndOffset >> 16));
+                    long currentHash = (t - (long)(Entries[i].FileOffset));
                     if (currentHash < 1)
-                        currentHash = ((long)(Entries[i].DatIndexAndOffset >> 16) - t);
+                        currentHash = ((long)(Entries[i].FileOffset) - t);
 
                     if (weirdHash > currentHash)
                         entry = Entries[i];
@@ -166,45 +198,41 @@ namespace DriveClubFS
 
         static void ExtractString(Span<byte> outputBuffer, int dictSize, Span<byte> dict, ref Span<byte> compData)
         {
-            Span<byte> outputStr = new byte[0x80];
+            Span<byte> currentDict = new byte[0x88];
 
-            if (dictSize - 1 > 0)
+            int i = 0;
+            byte data = 0xFF;
+            int strOffset = 0;
+
+            while (data != 0 || strOffset < dictSize - 1)
             {
-                int i = 0;
-                Span<byte> outputEnd = outputBuffer.Slice(dictSize - 1);
-                byte currentOffset;
-
-                do
+                while (true)
                 {
-                    while (true)
+                    Span<byte> currentPtr = compData;
+                    if (i > 0)
                     {
-                        Span<byte> currentPtr = compData;
-                        if (i > 0)
-                        {
-                            --i;
-                            currentPtr = outputStr.Slice(i);
-                        }
-                        else
-                        {
-                            compData = compData[1..];
-                            i = 0;
-                        }
-
-                        currentOffset = currentPtr[0];
-                        if ((currentOffset & 0x80) == 0)
-                            break;
-
-                        outputStr[i] = dict[currentOffset];
-                        outputStr[i + 1] = dict[currentOffset - 0x80];
-                        i += 2;
+                        --i;
+                        currentPtr = currentDict.Slice(i);
+                    }
+                    else
+                    {
+                        compData = compData[1..];
+                        i = 0;
                     }
 
-                    outputBuffer[0] = currentOffset;
-                    outputBuffer = outputBuffer[1..];
-                } while (currentOffset != 0 && outputBuffer != outputEnd);
-            }
+                    data = currentPtr[0];
+                    if ((data & 0x80) == 0)
+                        break;
 
-            outputBuffer[0] = 0;
+                    currentDict[i] = dict[data];
+                    currentDict[i + 1] = dict[(byte)(data - 0x80)];
+                    i += 2;
+                }
+
+                outputBuffer[strOffset++] = data;
+                if (data == 0)
+                    return;
+            }
         }
     }
 }

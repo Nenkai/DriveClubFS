@@ -12,7 +12,8 @@ namespace DriveClubFS
     {
         public string FileName { get; set; }
 
-        public ulong DatIndexAndOffset { get; set; }
+        public ushort DatIndex { get; set; }
+        public ulong FileOffset { get; set; }
         public int Size { get; set; }
         public uint FileNameHash { get; set; }
         public byte[] FileMD5Checksum { get; set; }

@@ -5,10 +5,10 @@ using System.Text;
 using System.Threading.Tasks;
 
 using K4os.Compression.LZ4;
+using ICSharpCode.SharpZipLib.Zip.Compression;
 using Syroot.BinaryData;
 using System.Buffers.Binary;
 using System.Buffers;
-
 using System.Security.Cryptography;
 
 namespace DriveClubFS
@@ -37,7 +37,7 @@ namespace DriveClubFS
             DataFile = datFile;
             FileName = fileName;
 
-            int chunkIndex = (int)((indexEntry.DatIndexAndOffset >> 16) / datFile.BufferSize);
+            int chunkIndex = (int)(indexEntry.FileOffset / datFile.BufferSize);
             var outBuffer = EvoFileSystemBuffer.Create(datFile, datFile.DataIndex, chunkIndex);
             if (outBuffer.CurrentChunkIndex == chunkIndex && outBuffer.CompressionFormat == 0)
             {
@@ -54,7 +54,7 @@ namespace DriveClubFS
 
         public bool Read(Span<byte> output, int length)
         {
-            long currentPosition = Position + (long)(_indexEntry.DatIndexAndOffset >> 16);
+            long currentPosition = Position + (long)_indexEntry.FileOffset;
             int currentChunkIndex = (int)(currentPosition / DataFile.BufferSize);
 
             if (currentChunkIndex != OutputBuffer.CurrentChunkIndex)
@@ -184,24 +184,52 @@ namespace DriveClubFS
             }
         }
 
-        private int ProcessCompressedChunk(int compressionType, Span<byte> input, Span<byte> output, int length)
+        private int ProcessCompressedChunk(EvoCompressionType compressionType, byte[] input, byte[] output, int length)
         {
             switch (compressionType)
             {
-                case 7:
+                case EvoCompressionType.NoPack:
+                    return HandleNoPack(input, output, length);
+
+                case EvoCompressionType.Zlib:
+                    return HandleZlib(input, output, length);
+
+                case EvoCompressionType.LZ4:
+                case EvoCompressionType.LZ4HC:
                     return HandleLZ4(input, output, length);
+
+                default:
+                    throw new NotSupportedException($"Unsupported compression type '{compressionType}'");
             }
 
             return 0;
         }
 
-        private int HandleLZ4(Span<byte> input, Span<byte> output, int length)
+        private int HandleNoPack(byte[] input, byte[] output, int length)
+        {
+            MemCpy(input, output, length);
+            return length;
+        }
+
+        private int HandleZlib(byte[] input, byte[] output, int length)
+        {
+            if (input[0] == 0x55)
+                throw new NotImplementedException();
+
+            var deflater = new Inflater(noHeader: false);
+            deflater.SetInput(input);
+            deflater.Inflate(output);
+
+            return length;
+        }
+
+        private int HandleLZ4(byte[] input, byte[] output, int length)
         {
             if (input[0] == 0x55)
                 throw new NotImplementedException();
 
             int decompressedSize = BinaryPrimitives.ReadInt32LittleEndian(input);
-            if (LZ4Codec.Decode(input.Slice(4, length - 4), output) == decompressedSize)
+            if (LZ4Codec.Decode(input.AsSpan(4, length - 4), output.AsSpan()) == decompressedSize)
                 return decompressedSize;
 
             return 0;
