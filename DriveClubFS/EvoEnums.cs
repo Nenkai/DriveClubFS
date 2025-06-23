@@ -4,17 +4,16 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace DriveClubFS
+namespace DriveClubFS;
+
+public enum EvoCompressionType
 {
-    public enum EvoCompressionType
-    {
-        NoPack,
-        RaPack,
-        Zlib,
-        LZRP3,
-        LZMA,
-        LZlib,
-        LZ4,
-        LZ4HC,
-    }
+    NoPack,
+    RaPack,
+    Zlib,
+    LZRP3,
+    LZMA,
+    LZlib,
+    LZ4,
+    LZ4HC,
 }

@@ -2,7 +2,7 @@
   "profiles": {
     "DriveClubFS": {
       "commandName": "Project",
-      "commandLineArgs": "unpackall -i D:\\EP9000-CUSA00003_00-XXXXXXXDRIVECLUB-A0100-V0128\\CUSA00003"
+      "commandLineArgs": "unpack-all -i D:\\DriveclubOut\\Image0"
     }
   }
 }
