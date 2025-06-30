@@ -1,0 +1,102 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+
+namespace DriveClubFS.Resources;
+
+public struct ResourceIdentifier
+{
+    public ulong Uid { get; set; }
+    public ulong Id => Uid & 0xFFFFFFFFFFFF;
+    public ResourceTypeId Type => (ResourceTypeId)(ushort)(Uid >> 48);
+
+    public ResourceIdentifier(ulong uid) => Uid = uid;
+    public static implicit operator ResourceIdentifier(ulong uid) => new ResourceIdentifier(uid);
+
+    public override string ToString()
+    {
+        return $"{Uid:X8} ({Type})";
+    }
+}
+
+public enum ResourceTypeId
+{
+    RTUID_UNKNOWN = 0,
+    RTUID_RESOURCE_INFO_BLOCK = 1,
+    RTUID_STREAM_FORMAT = 2,
+    RTUID_VERTEX_BUFFER = 3,
+    RTUID_INDEX_BUFFER = 4,
+    RTUID_PIXEL_BUFFER = 5,
+    RTUID_SHADER = 6,
+    RTUID_MATERIAL = 7,
+    RTUID_MESH = 8,
+    RTUID_RESOURCE_COLLECTION = 9,
+    RTUID_HAVOK = 10,
+    RTUID_HIERARCHY = 11,
+    RTUID_RIGID_BODY_BINDINGS = 12,
+    RTUID_MOTORSTORM_WORLD = 13,
+    RTUID_MESHES = 14,
+    RTUID_SCENE = 15,
+    RTUID_MOTORSTORM_VEHICLE = 16,
+    RTUID_FONT = 17,
+    RTUID_CAMERAS = 18,
+    RTUID_CAMERA = 19,
+    RTUID_MOTORSTORM_SCENEOBJECT = 20,
+    RTUID_MOTORSTORM_ENVIRONMENT = 21,
+    RTUID_MOTORSTORM_CHARACTER = 22,
+    RTUID_BASICBITMAP = 23,
+    RTUID_MOTORSTORM_SOLIDS = 24,
+    RTUID_MOTORSTORM_GROUND_RUSH = 25,
+    RTUID_MOTORSTORM_PARTICLEEFFECT = 26,
+    RTUID_ROADSYSTEM = 27,
+    RTUID_GPU_PROGRAM = 28,
+    RTUID_GPU_PROGRAMBASE = 29,
+    RTUID_ATTRIBUTE_SET = 30,
+    RTUID_ATTRIBUTE_SET_BINDINGS = 31,
+    RTUID_BASICFONT = 32,
+    RTUID_OCTREE = 33,
+    RTUID_GUI_ANIM = 34,
+    RTUID_PLANT = 35,
+    RTUID_ANIMATIONS = 36,
+    RTUID_MOTORSTORM_LIGHTS = 37,
+    RTUID_BIN = 38,
+    RTUID_XML = 39,
+    RTUID_PATCH = 40,
+    RTUID_NEXUS_CHARACTER = 41,
+    RTUID_NEXUS_ANIMATION = 42,
+    RTUID_LEVEL_DATA = 43,
+    RTUID_LEVEL_TRIGGER_VolumeResource = 44,
+    RTUID_LEVEL_DO_RESET_VolumeResource = 45,
+    RTUID_LEVEL_NO_RESET_VolumeResource = 46,
+    RTUID_LEVEL_SPAWN_POINT = 47,
+    RTUID_LEVEL_ROAD_REGION_VolumeResource = 48,
+    RTUID_LEVEL_START_StartFinishVolumeResource = 49,
+    RTUID_LEVEL_ROAD_DATA = 52,
+    RTUID_AUDIO_VEHICLEAUDIO = 53,
+    RTUID_AUDIO_VEHICLESOUNDEFFECT = 54,
+    RTUID_AUDIO_VEHICLESAMPLE = 55,
+    RTUID_ROAD_NETWORK = 56,
+    RTUID_LEVEL_SPLIT_VolumeResource = 57,
+    RTUID_DEM = 58,
+    RTUID_DEM_TILE = 59,
+    RTUID_VEHICLE_CUSTOM_DATA = 60,
+    RTUID_LEVEL_SCRIPTED_ROAD_LINE = 61,
+    RTUID_PROCEDURAL_PLACEMENT = 62,
+    RTUID_ACTOR_DATA = 63,
+    RTUID_HABOOB_TEX_ATLAS_INDEX = 64,
+    RTUID_CROWDS = 65,
+    RTUID_AUDIO_SOUNDGROUP = 66,
+    RTUID_SVGMESH = 67,
+    RTUID_LEVEL_DRIFT_ZONE = 68,
+    RTUID_AUDIO_FSB = 69,
+    RTUID_ANIMATIONLIB = 70,
+    RTUID_TOP_MIPS = 71,
+    RTUID_LEVEL_AI_MAX_SPEED_VolumeResource = 72,
+    RTUID_SCRIPTED_ROAD_REGION_VOLUME_VolumeResource = 73,
+    RTUID_TRIGGER_DATA = 74,
+    RTUID_DUST_DATA = 75,
+    RTUID_VEHICLE_PARTICLES_DATA = 76,
+}

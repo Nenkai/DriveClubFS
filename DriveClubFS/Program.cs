@@ -7,11 +7,18 @@ using System.Text;
 using CommandLine;
 using CommandLine.Text;
 
+using CommunityToolkit.HighPerformance;
+using CommunityToolkit.HighPerformance.Buffers;
+
+using DriveClubFS.Resources;
+using DriveClubFS.Resources.Types;
+using DriveClubFS.Utils;
+
 namespace DriveClubFS;
 
 public class Program
 {
-    public const string Version = "1.0.0";
+    public const string Version = "1.1.0";
     static void Main(string[] args)
     {
         Console.WriteLine("-----------------------------------------");
@@ -21,12 +28,14 @@ public class Program
         Console.WriteLine("- https://twitter.com/Nenkaai");
         Console.WriteLine("-----------------------------------------");
         Console.WriteLine("");
-
-        var p = Parser.Default.ParseArguments<UnpackAllVerbs, UnpackFileVerbs, ListFilesVerbs>(args);
+        
+        var p = Parser.Default.ParseArguments<UnpackAllVerbs, UnpackFileVerbs, ListFilesVerbs, ExtractRpkVerbs, ExtractRpksVerbs>(args);
 
         p.WithParsed<UnpackAllVerbs>(UnpackAll)
          .WithParsed<UnpackFileVerbs>(UnpackFile)
          .WithParsed<ListFilesVerbs>(ListFiles)
+         .WithParsed<ExtractRpkVerbs>(ExtractRpk)
+         .WithParsed<ExtractRpksVerbs>(ExtractRpks)
          .WithNotParsed(HandleNotParsedArgs);
     }
 
@@ -60,6 +69,227 @@ public class Program
         using var evoFs = new EvoFileSystem();
         evoFs.Init(options.InputPath);
         evoFs.ListFiles();
+    }
+
+    public static void ExtractRpk(ExtractRpkVerbs verbs)
+    {
+        if (!File.Exists(verbs.InputPath))
+        {
+            Console.WriteLine("[x] ERROR: File does not exist.");
+            return;
+        }
+
+        ExtractRpkInternal(verbs.InputPath);
+    }
+
+    public static void ExtractRpks(ExtractRpksVerbs verbs)
+    {
+        if (!Directory.Exists(verbs.InputPath))
+        {
+            Console.WriteLine("[x] ERROR: Folder does not exist.");
+            return;
+        }
+
+        foreach (var rpkFilePath in Directory.GetFiles(verbs.InputPath, "*.rpk", verbs.Recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly))
+        {
+            ExtractRpkInternal(rpkFilePath);
+        }
+    }
+
+    private static void ExtractRpkInternal(string rpkFilePath)
+    {
+        string dirName = Path.GetDirectoryName(rpkFilePath)!;
+        string fileName = Path.GetFileNameWithoutExtension(rpkFilePath);
+
+        Console.WriteLine($"[-] Loading {rpkFilePath}...");
+        var resourcePack = ResourcePack.Open(rpkFilePath);
+        Console.WriteLine($"[/] Loaded {rpkFilePath}.");
+
+        string topMipsPath = Path.Combine(dirName, fileName + "_top_mips.rpk");
+        bool gotTopMips = false;
+        if (File.Exists(topMipsPath))
+        {
+            Console.WriteLine($"[-] Loading top mips pack...");
+            var mipPack = ResourcePack.Open(topMipsPath);
+            resourcePack.TopMipsPacks.Add(mipPack);
+            Console.WriteLine($"[/] Loaded top mips.");
+            gotTopMips = true;
+        }
+
+        if (!gotTopMips)
+        {
+            topMipsPath = Path.Combine(dirName, fileName + "_topmips.rpk"); // tracks
+            if (File.Exists(topMipsPath))
+            {
+                Console.WriteLine($"[-] Loading top mips pack...");
+                var mipPack = ResourcePack.Open(topMipsPath);
+                resourcePack.TopMipsPacks.Add(mipPack);
+                Console.WriteLine($"[/] Loaded top mips.");
+                gotTopMips = true;
+            }
+        }
+
+        if (!gotTopMips)
+        {
+            for (int i = 0; i < fileName.Length; i++)
+            {
+                if (fileName[i] == '_')
+                {
+                    topMipsPath = Path.Combine(dirName, fileName.Substring(0, i) + "_common_topmips.rpk"); // tracks
+                    if (File.Exists(topMipsPath))
+                    {
+                        Console.WriteLine($"[-] Loading top mips pack {topMipsPath}...");
+                        var mipPack = ResourcePack.Open(topMipsPath);
+                        resourcePack.TopMipsPacks.Add(mipPack);
+                        Console.WriteLine($"[/] Loaded top mips.");
+                    }
+                }
+            }
+        }
+
+        foreach (var info in resourcePack.ResourceInfos)
+        {
+            string outputDir = Path.Combine(dirName, $"{fileName}_rpk_extracted");
+
+            switch (info.Key.Type)
+            {
+                case ResourceTypeId.RTUID_PIXEL_BUFFER:
+                    {
+                        ProcessTexture(resourcePack, info, outputDir);
+                        break;
+                    }
+
+                case ResourceTypeId.RTUID_BIN:
+                    {
+                        Console.WriteLine($"Extracting BIN resource - {info.Value.Names[0]}");
+                        BinaryResource binResource = resourcePack.GetResourceData<BinaryResource>(info.Key);
+                        Directory.CreateDirectory(outputDir);
+
+                        if (binResource.Data.Length != 0)
+                            File.WriteAllBytes(Path.Combine(outputDir, info.Value.Names[0]), binResource.Data);
+                        break;
+                    }
+
+                case ResourceTypeId.RTUID_XML:
+                    {
+                        Console.WriteLine($"Extracting XML resource - {info.Value.Names[0]}");
+                        XmlResource xmlResource = resourcePack.GetResourceData<XmlResource>(info.Key);
+                        Directory.CreateDirectory(outputDir);
+
+                        File.WriteAllBytes(Path.Combine(outputDir, info.Value.Names[0]), xmlResource.Data);
+                        break;
+                    }
+            }
+        }
+    }
+
+    private static void ProcessTexture(ResourcePack resourcePack, KeyValuePair<ResourceIdentifier, ResourceInfo> info, string outputDir)
+    {
+        PixelBufferResource pixelBuffer = resourcePack.GetResourceData<PixelBufferResource>(info.Key);
+        Directory.CreateDirectory(outputDir);
+
+        if (pixelBuffer.Resource.Version >= 0x20003)
+        {
+            PixelFormat format = (PixelFormat)pixelBuffer.PixelFormat;
+
+            int width = pixelBuffer.WriteWidth;
+            int height = pixelBuffer.WriteHeight;
+
+            byte[] inputData;
+            if (pixelBuffer.StartMip != 0)
+            {
+                Console.WriteLine($"[-] Processing PIXEL_BUFFER {info.Value.Names[0]} ({format}, {pixelBuffer.WriteWidth}x{pixelBuffer.WriteHeight}) from TOP_MIPS");
+
+                try
+                {
+                    TopMipsResource topMips = resourcePack.GetResourceData<TopMipsResource>(pixelBuffer.TopMipsIdentifier);
+                    inputData = topMips.Data;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[X] Could not find top mips with identifier {pixelBuffer.TopMipsIdentifier}! Skipping.");
+                    return;
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[-] Processing PIXEL_BUFFER {info.Value.Names[0]}  ({format}, {pixelBuffer.WriteWidth}x{pixelBuffer.WriteHeight})");
+                inputData = pixelBuffer.Data;
+            }
+
+            /*
+            for (int i = 0; i < pixelBuffer.StartMip; i++)
+            {
+                width /= 2;
+                height /= 2;
+            }
+            */
+
+            DXGI_FORMAT dxgiFormat = PixelFormatToDxgiFormat(format);
+            int pixelsPerBlock = (int)DxgiUtils.PixelsPerBlock(dxgiFormat);
+            int bpp = (int)DxgiUtils.BitsPerPixel(dxgiFormat);
+            int blockSize = pixelsPerBlock == 1 ? bpp / 8 : bpp * 2;
+
+            byte[] output = new byte[(width * height * bpp) / 8];
+            MemoryOwner<byte> ddsHeader = MemoryOwner<byte>.Allocate(0x100 + output.Length, AllocationMode.Clear);
+
+            PS4Swizzler.Swizzle(inputData, output, width, height, pixelsPerBlock, blockSize);
+
+            var flags = DDSHeaderFlags.TEXTURE | DDSHeaderFlags.LINEARSIZE;
+            if (pixelBuffer.MipLevels > 1)
+                flags |= DDSHeaderFlags.MIPMAP;
+
+            var dds = new DdsHeader()
+            {
+                Flags = flags,
+                Width = width,
+                Height = height,
+                FormatFlags = DDSPixelFormatFlags.DDPF_FOURCC,
+                LastMipmapLevel = 1,
+                FourCCName = "DX10",
+                PitchOrLinearSize = (int)0,
+                DxgiFormat = PixelFormatToDxgiFormat(format),
+                ImageData = output,
+            };
+
+            dds.Write(ddsHeader.AsStream());
+            File.WriteAllBytes(Path.Combine(outputDir, Path.GetFileNameWithoutExtension(info.Value.Names[0]) + ".dds"), ddsHeader.Span);
+        }
+        else
+        {
+            PixelFormatOld pixelFormat = (PixelFormatOld)pixelBuffer.PixelFormat;
+            Console.WriteLine($"[x] Skipping PIXEL_BUFFER {info.Value.Names[0]}, PS3 not currently supported");
+        }
+    }
+
+    private static DXGI_FORMAT PixelFormatToDxgiFormat(PixelFormat pixelFormat)
+    {
+        return pixelFormat switch
+        {
+            PixelFormat.RGBA_32_I_LIN => DXGI_FORMAT.DXGI_FORMAT_R8G8B8A8_UNORM,
+            PixelFormat.RGBA_32_I_SRGB => DXGI_FORMAT.DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+            PixelFormat.RGBA_64_F => DXGI_FORMAT.DXGI_FORMAT_R16G16B16A16_FLOAT,
+            PixelFormat.RGBA_128_F => DXGI_FORMAT.DXGI_FORMAT_R32G32B32A32_FLOAT,
+
+            PixelFormat.DXT1_LIN => DXGI_FORMAT.DXGI_FORMAT_BC1_UNORM,
+            PixelFormat.DXT1_SRGB => DXGI_FORMAT.DXGI_FORMAT_BC1_UNORM_SRGB,
+            PixelFormat.DXT3_LIN => DXGI_FORMAT.DXGI_FORMAT_BC3_UNORM,
+            PixelFormat.DXT3_SRGB => DXGI_FORMAT.DXGI_FORMAT_BC3_UNORM_SRGB,
+            PixelFormat.DXT5_LIN => DXGI_FORMAT.DXGI_FORMAT_BC5_UNORM,
+            PixelFormat.DXT5_SRGB => DXGI_FORMAT.DXGI_FORMAT_BC5_SNORM,
+            PixelFormat.A8_UNORM => DXGI_FORMAT.DXGI_FORMAT_A8_UNORM,
+
+            PixelFormat.R_32_F => DXGI_FORMAT.DXGI_FORMAT_R32_FLOAT,
+            PixelFormat.BC4_UNORM => DXGI_FORMAT.DXGI_FORMAT_BC4_UNORM,
+            PixelFormat.BC4_SNORM => DXGI_FORMAT.DXGI_FORMAT_BC4_SNORM,
+            PixelFormat.BC5_UNORM => DXGI_FORMAT.DXGI_FORMAT_BC5_UNORM,
+            PixelFormat.BC5_SNORM => DXGI_FORMAT.DXGI_FORMAT_BC5_SNORM,
+            PixelFormat.BC6H_UF => DXGI_FORMAT.DXGI_FORMAT_BC6H_UF16,
+            PixelFormat.BC6H_SF => DXGI_FORMAT.DXGI_FORMAT_BC6H_SF16,
+            PixelFormat.BC7_UNORM => DXGI_FORMAT.DXGI_FORMAT_BC7_UNORM,
+            PixelFormat.BC7_SRGB => DXGI_FORMAT.DXGI_FORMAT_BC7_UNORM_SRGB,
+            _ => throw new NotSupportedException($"Pixel format {pixelFormat} not supported")
+        };
     }
 
     public static void HandleNotParsedArgs(IEnumerable<Error> errors)
@@ -99,6 +329,26 @@ public class Program
     {
         [Option('i', "input", Required = true, HelpText = "Input folder where game.ndx is located.")]
         public required string InputPath { get; set; }
+    }
+
+
+    [Verb("extract-rpk", HelpText = "Tries to extract all supported components out of a resource pack (.rpk) file.\n" +
+        "Currently, only textures, binary resources and xml resources are supported.")]
+    public class ExtractRpkVerbs
+    {
+        [Option('i', "input", Required = true, HelpText = "Resource Pack (.rpk) file path.")]
+        public required string InputPath { get; set; }
+    }
+
+    [Verb("extract-rpks", HelpText = "Tries to extract all supported components out of resource packs (.rpk) in the specified folder.\n" +
+        "Currently, only textures, binary resources and xml resources are supported.")]
+    public class ExtractRpksVerbs
+    {
+        [Option('i', "input", Required = true, HelpText = "Folder containing .rpk files.")]
+        public required string InputPath { get; set; }
+
+        [Option('r', HelpText = "Whether to extract recursively.")]
+        public bool Recursive { get; set; }
     }
 
     // Useful signatures (1.28, generated with IDA/IDA Fusion Plugin) :

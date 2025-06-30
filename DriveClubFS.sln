@@ -5,6 +5,10 @@ VisualStudioVersion = 17.2.32602.215
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DriveClubFS", "DriveClubFS\DriveClubFS.csproj", "{A077C6D8-484F-4525-B24B-C22FE6086B7A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DriveClubFS.Resources", "DriveClubFS.Resources\DriveClubFS.Resources.csproj", "{9B879681-E047-4E51-B176-DCAF3CEA42B3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DriveClubFS.Utils", "DriveClubFS.Utils\DriveClubFS.Utils.csproj", "{0E9F7EA8-9176-43E6-B290-8240FD48A9CD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +19,14 @@ Global
 		{A077C6D8-484F-4525-B24B-C22FE6086B7A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A077C6D8-484F-4525-B24B-C22FE6086B7A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A077C6D8-484F-4525-B24B-C22FE6086B7A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9B879681-E047-4E51-B176-DCAF3CEA42B3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9B879681-E047-4E51-B176-DCAF3CEA42B3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9B879681-E047-4E51-B176-DCAF3CEA42B3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9B879681-E047-4E51-B176-DCAF3CEA42B3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E9F7EA8-9176-43E6-B290-8240FD48A9CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E9F7EA8-9176-43E6-B290-8240FD48A9CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E9F7EA8-9176-43E6-B290-8240FD48A9CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E9F7EA8-9176-43E6-B290-8240FD48A9CD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
