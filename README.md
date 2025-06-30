@@ -11,7 +11,7 @@ Supports:
 
 ## Booting DriveClub unpacked
 
-Simply extract to the root of the game (folders in the extracted folder goes to the root). You are free to remove dat files afterwards (if you are using an emulator, or fpkg repacking).
+Simply extract to the root of the game (folders in the extracted folder goes to the root). You are free to remove dat files (if you are using an emulator, or fpkg repacking).
 
 ## Format Documentation
 https://github.com/Nenkai/010GameTemplates/tree/main/Evolution%20Studios/DriveClub
